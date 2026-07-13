@@ -292,8 +292,9 @@ CELLS = [
             subprocess.run(
                 make_udocker_run([
                     "python", "-c",
-                    "from voice_tts.runtime import require_cuda, ensure_model_downloaded; "
-                    "require_cuda(); print(ensure_model_downloaded())",
+                    "from voice_tts.runtime import require_cuda, ensure_model_downloaded, get_model; "
+                    "require_cuda(); print(ensure_model_downloaded()); "
+                    "print('Model:', type(get_model()).__name__)",
                 ]),
                 env=udocker_env,
                 check=True,
@@ -320,8 +321,9 @@ CELLS = [
             subprocess.run(
                 [
                     str(COLAB_PYTHON), "-c",
-                    "from voice_tts.runtime import require_cuda, ensure_model_downloaded; "
-                    "require_cuda(); print(ensure_model_downloaded())",
+                    "from voice_tts.runtime import require_cuda, ensure_model_downloaded, get_model; "
+                    "require_cuda(); print(ensure_model_downloaded()); "
+                    "print('Model:', type(get_model()).__name__)",
                 ],
                 cwd=APP_DIR,
                 env=native_env,
@@ -367,7 +369,7 @@ CELLS = [
         if EXECUTION_MODE == "udocker":
             process_env = udocker_env.copy()
             command = make_udocker_run(
-                ["python", "app.py", "--share", "--port", "7860"],
+                ["python", "app.py", "--host", "127.0.0.1", "--share", "--port", "7860"],
                 {
                     "GRADIO_USERNAME": gradio_username,
                     "GRADIO_PASSWORD": gradio_password,

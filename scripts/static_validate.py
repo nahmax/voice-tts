@@ -63,7 +63,7 @@ def validate_notebooks() -> None:
         '"--allow-root"',
         'EXECUTION_MODE == "udocker"',
         'EXECUTION_MODE == "native"',
-        'require_cuda(); print(ensure_model_downloaded())',
+        "print('Model:', type(get_model()).__name__)",
         '"--share", "--port", "7860"',
         'STOP_APP = False',
         'WARNING: Google Drive mount failed',
@@ -75,6 +75,14 @@ def validate_notebooks() -> None:
         if required not in code:
             raise ValueError(f"Canonical notebook is missing: {required}")
     print("Colab OCI/GPU workflow present: voice_tts_colab_gpu.ipynb")
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    if "python -m pip uninstall -y deepspeed" not in dockerfile:
+        raise ValueError("Docker image must remove the training-only DeepSpeed package")
+
+    app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+    if "allowed_paths=[str(runs_dir(DATA_DIR))]" not in app_source:
+        raise ValueError("Gradio must be allowed to serve generated WAV files")
 
 
 def validate_text_artifacts() -> None:

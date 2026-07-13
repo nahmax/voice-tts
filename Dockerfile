@@ -42,6 +42,10 @@ RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git /opt/Cosy
     && python -m pip install --no-build-isolation --no-deps openai-whisper==20231117 \
     && python -m pip install -r /opt/CosyVoice/requirements.txt
 
+# DeepSpeed is required by CosyVoice training modules only. Leaving it installed
+# makes Transformers probe nvcc at import time, which breaks the CUDA runtime image.
+RUN python -m pip uninstall -y deepspeed
+
 WORKDIR /workspace
 COPY requirements-app.txt ./requirements-app.txt
 RUN python -m pip install -r requirements-app.txt

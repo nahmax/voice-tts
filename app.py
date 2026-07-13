@@ -288,6 +288,7 @@ def main() -> None:
         server_port=args.port,
         share=args.share,
         auth=auth,
+        allowed_paths=[str(runs_dir(DATA_DIR))],
         show_error=True,
     )
 
