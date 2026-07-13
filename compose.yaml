@@ -1,0 +1,35 @@
+name: voice-tts
+
+services:
+  app:
+    image: ${VOICE_TTS_IMAGE:-voice-tts:local}
+    build:
+      context: .
+      args:
+        COSYVOICE_REF: ${COSYVOICE_REF:-074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc}
+    ports:
+      - "${VOICE_TTS_PORT:-7860}:7860"
+    environment:
+      MODEL_ID: ${MODEL_ID:-FunAudioLLM/Fun-CosyVoice3-0.5B-2512}
+      MODEL_REVISION: ${MODEL_REVISION:-29e01c4e8d000f4bcd70751be16fa94bf3d85a18}
+      MODEL_DIR: /models/Fun-CosyVoice3-0.5B
+      DATA_DIR: /data
+      HF_HOME: /models/huggingface
+      WHISPER_CACHE_DIR: /models/whisper
+      REQUIRE_CUDA: "1"
+      COSYVOICE_FP16: "1"
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      GRADIO_SHARE: "0"
+      GRADIO_USERNAME: ${GRADIO_USERNAME:-voice}
+      GRADIO_PASSWORD: ${GRADIO_PASSWORD:-change-me-now}
+    volumes:
+      - ./runtime/models:/models
+      - ./runtime/data:/data
+    shm_size: "8gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -1,0 +1,6 @@
+# CosyVoice's pinned requirements provide torch, torchaudio, Gradio,
+# Whisper, Hugging Face Hub and the model runtime. This file contains only
+# app-level pins that must remain aligned with the upstream project.
+gradio==5.4.0
+huggingface-hub>=0.25.0,<1.0
+

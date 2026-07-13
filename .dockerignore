@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.codex
+__pycache__
+*.pyc
+.venv
+runtime
+models
+data
+local_voice_library
+local_voice_library_upload.zip
+output
+tests
+

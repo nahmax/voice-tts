@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.agents/
+.codex/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.env
+
+# Runtime data and downloaded model weights are never committed.
+runtime/
+models/
+data/
+_drive_sim/
+_voice_library_import/
+
+# Generated audio and local voice recordings stay private.
+local_voice_library/voices/**
+!local_voice_library/voices/**/
+!local_voice_library/voices/**/README.txt
+local_voice_library_upload.zip
+
+# Notebook runtime residue.
+.ipynb_checkpoints/

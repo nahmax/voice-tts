@@ -1,0 +1,5 @@
+segment_id,start_time,end_time,lang,emotion,speed,text
+001,00:00:01.000,00:00:04.500,ru,calm,1.0,"Текст первой фразы"
+002,00:00:04.500,00:00:08.000,en,serious,1.0,"Second phrase text"
+003,00:00:08.000,00:00:12.000,de,neutral,1.0,"Deutscher Text"
+
