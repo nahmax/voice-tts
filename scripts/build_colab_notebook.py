@@ -37,12 +37,12 @@ CELLS = [
         """
         # Voice TTS: единый центр управления в Google Colab L4
 
-        Этот notebook получает код из GitHub, подключает Google Drive и запускает один и тот же Gradio-интерфейс двумя способами:
+        Этот notebook получает код из GitHub, пытается подключить Google Drive и запускает один и тот же Gradio-интерфейс двумя способами:
 
         - `udocker` (по умолчанию) — исполняет **точный OCI/Docker-образ**, который GitHub Actions собрал для выбранного Git-коммита;
         - `native` — резервный запуск того же `app.py` в изолированном Python 3.10 окружении Colab.
 
-        Через UI можно загрузить или записать разрешённый голос, ввести текст и получить WAV. Голоса, модели и результаты сохраняются в `MyDrive/Voice TTS/` и не исчезают вместе с временной Colab-машиной.
+        Через UI можно загрузить или записать разрешённый голос, ввести текст и получить WAV. При рабочем Drive голоса, модели и результаты сохраняются в `MyDrive/Voice TTS/`; при сбое DriveFS notebook явно переключается на временный `/content/voice-tts-data` и не блокирует GPU workflow.
         """
     ),
     markdown(
@@ -150,22 +150,34 @@ CELLS = [
     ),
     markdown(
         """
-        ## 4. Постоянное хранилище Google Drive
+        ## 4. Хранилище: Google Drive с локальным fallback
 
-        Модель, библиотека голосов и результаты будут доступны после нового подключения Colab.
+        По умолчанию notebook запрашивает доступ к `MyDrive/Voice TTS/`. Если Google DriveFS возвращает `mount failed`, работа продолжается во временном `/content/voice-tts-data`; такие данные исчезнут после удаления runtime.
         """
     ),
     code(
         """
         from google.colab import drive  # type: ignore
 
-        drive.mount("/content/drive")
-        DRIVE_ROOT = Path("/content/drive/MyDrive/Voice TTS")
-        DATA_DIR = DRIVE_ROOT
-        MODEL_DIR = DRIVE_ROOT / "models" / "Fun-CosyVoice3-0.5B"
+        USE_GOOGLE_DRIVE = True  # @param {type:"boolean"}
+        STORAGE_IS_PERSISTENT = False
+        if USE_GOOGLE_DRIVE:
+            try:
+                drive.mount("/content/drive")
+                STORAGE_ROOT = Path("/content/drive/MyDrive/Voice TTS")
+                STORAGE_IS_PERSISTENT = True
+            except ValueError as exc:
+                print(f"WARNING: Google Drive mount failed ({exc}); using temporary Colab storage.")
+                STORAGE_ROOT = Path("/content/voice-tts-data")
+        else:
+            STORAGE_ROOT = Path("/content/voice-tts-data")
+
+        DATA_DIR = STORAGE_ROOT
+        MODEL_DIR = STORAGE_ROOT / "models" / "Fun-CosyVoice3-0.5B"
         for folder in [DATA_DIR / "voices", DATA_DIR / "runs", MODEL_DIR]:
             folder.mkdir(parents=True, exist_ok=True)
-        print("Drive workspace:", DRIVE_ROOT)
+        print("Storage workspace:", STORAGE_ROOT)
+        print("Persistent:", STORAGE_IS_PERSISTENT)
         """
     ),
     markdown(
@@ -232,8 +244,8 @@ CELLS = [
             merged_env = {**common_container_env, **(extra_env or {})}
             return [
                 "udocker", "--allow-root", "run",
-                f"--volume={DRIVE_ROOT}:/data",
-                f"--volume={DRIVE_ROOT / 'models'}:/models",
+                f"--volume={STORAGE_ROOT}:/data",
+                f"--volume={STORAGE_ROOT / 'models'}:/models",
                 "--workdir=/workspace",
                 *[f"--env={key}={value}" for key, value in merged_env.items()],
                 CONTAINER_NAME,
@@ -294,7 +306,7 @@ CELLS = [
                 "MODEL_DIR": str(MODEL_DIR),
                 "MODEL_ID": MODEL_ID,
                 "MODEL_REVISION": MODEL_REVISION,
-                "HF_HOME": str(DRIVE_ROOT / "models" / "huggingface"),
+                "HF_HOME": str(STORAGE_ROOT / "models" / "huggingface"),
                 "REQUIRE_CUDA": "1",
             })
             subprocess.run(
@@ -362,8 +374,8 @@ CELLS = [
                 "MODEL_DIR": str(MODEL_DIR),
                 "MODEL_REVISION": MODEL_REVISION,
                 "DATA_DIR": str(DATA_DIR),
-                "HF_HOME": str(DRIVE_ROOT / "models" / "huggingface"),
-                "WHISPER_CACHE_DIR": str(DRIVE_ROOT / "models" / "whisper"),
+                "HF_HOME": str(STORAGE_ROOT / "models" / "huggingface"),
+                "WHISPER_CACHE_DIR": str(STORAGE_ROOT / "models" / "whisper"),
                 "REQUIRE_CUDA": "1",
                 "COSYVOICE_FP16": "1",
                 "WHISPER_MODEL": "base",

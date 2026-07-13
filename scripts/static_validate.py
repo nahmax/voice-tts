@@ -64,6 +64,8 @@ def validate_notebooks() -> None:
         'require_cuda(); print(ensure_model_downloaded())',
         '"--share", "--port", "7860"',
         'STOP_APP = False',
+        'WARNING: Google Drive mount failed',
+        'STORAGE_ROOT = Path("/content/voice-tts-data")',
     ]:
         if required not in code:
             raise ValueError(f"Canonical notebook is missing: {required}")
