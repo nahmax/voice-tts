@@ -56,14 +56,14 @@ Notebook сам:
 - проверяет, что выделена L4;
 - получает точный Git-коммит и вычисляет соответствующий GHCR-тег;
 - пытается подключить Google Drive и безопасно переключается на временное хранилище при `mount failed`;
-- в основном режиме устанавливает `udocker==1.3.17`, извлекает образ во временную файловую систему и выполняет `setup --nvidia`;
+- в основном режиме устанавливает `udocker==1.3.17`, скачивает каждый OCI-слой с HTTP Range resume, проверяет его размер и SHA-256, импортирует archive через `udocker load` и выполняет `setup --nvidia`;
 - проверяет `torch.cuda.is_available()` через приложение внутри образа;
 - в резервном режиме создаёт отдельный Python 3.10 runtime;
 - скачивает модель на Drive только при отсутствии весов;
 - запускает Gradio в фоне;
 - оставляет голоса и WAV в `MyDrive/Voice TTS/`.
 
-Если pull вернул `manifest not found or not authorized`, либо workflow ещё не закончил сборку SHA-тега, либо GHCR package остался private. Не вставляйте GitHub token прямо в notebook: дождитесь сборки и настройте публичное чтение package.
+Если получение manifest вернуло `manifest not found or not authorized`, либо workflow ещё не закончил сборку SHA-тега, либо GHCR package остался private. Не вставляйте GitHub token прямо в notebook: дождитесь сборки и настройте публичное чтение package. При обрыве большого blob notebook оставляет `.part`, получает новый временный URL и продолжает с сохранённого байта.
 
 ## Первая публикация в GitHub
 
@@ -139,6 +139,7 @@ docker compose exec app nvidia-smi
 - `Dockerfile` — Python 3.10/CUDA-образ с зафиксированным CosyVoice upstream.
 - `compose.yaml` — GPU reservation, volumes и порт 7860.
 - `scripts/bootstrap_colab.sh` — изолированная установка CosyVoice в hosted Colab.
+- `scripts/pull_oci_resumable.py` — возобновляемая загрузка и криптографическая проверка публичного GHCR OCI-образа.
 - `scripts/build_colab_notebook.py` — воспроизводимая сборка канонического notebook без сохранённых output.
 - `output/jupyter-notebook/voice_tts_colab_gpu.ipynb` — единый notebook управления.
 - `.github/workflows/docker.yml` — проверка и публикация образа в GHCR.

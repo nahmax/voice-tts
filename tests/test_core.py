@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 
+from scripts.pull_oci_resumable import (
+    blob_is_valid,
+    parse_image_reference,
+    select_platform_manifest,
+)
 from voice_tts.core import (
     COSYVOICE3_PROMPT_PREFIX,
     format_prompt_text,
@@ -18,6 +24,31 @@ from voice_tts.library import import_voice_library_zip
 
 
 class CoreTests(unittest.TestCase):
+    def test_ghcr_reference_and_platform_selection(self) -> None:
+        image = parse_image_reference("ghcr.io/NahMax/voice-tts:sha-123456789abc")
+        self.assertEqual(image.repository, "nahmax/voice-tts")
+        self.assertEqual(image.reference, "sha-123456789abc")
+        descriptor = select_platform_manifest(
+            {
+                "manifests": [
+                    {"digest": "sha256:attestation", "platform": {"os": "unknown", "architecture": "unknown"}},
+                    {"digest": "sha256:amd64", "platform": {"os": "linux", "architecture": "amd64"}},
+                ]
+            },
+            "linux",
+            "amd64",
+        )
+        self.assertEqual(descriptor["digest"], "sha256:amd64")
+
+    def test_cached_blob_requires_size_and_sha256(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "blob"
+            payload = b"verified OCI blob"
+            path.write_bytes(payload)
+            digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+            self.assertTrue(blob_is_valid(path, digest, len(payload)))
+            self.assertFalse(blob_is_valid(path, digest, len(payload) + 1))
+
     def test_voice_name_is_sanitized(self) -> None:
         self.assertEqual(sanitize_voice_name(" max main "), "max_main")
         self.assertEqual(sanitize_voice_name("голос-1"), "голос-1")

@@ -85,6 +85,8 @@ CELLS = [
         COSYVOICE_REPO = Path("/content/CosyVoice")
         COLAB_PYTHON = Path("/content/voice-tts-conda/bin/python")
         UDOCKER_DIR = Path("/content/udocker")
+        OCI_LAYOUT_DIR = Path("/content/voice-tts-oci-layout")
+        OCI_ARCHIVE = Path("/content/voice-tts-image.oci.tar")
 
         if EXECUTION_MODE not in {"udocker", "native"}:
             raise ValueError("EXECUTION_MODE must be 'udocker' or 'native'.")
@@ -214,7 +216,7 @@ CELLS = [
         """
         ## 5. Подготовка runtime и проверка CUDA
 
-        В режиме `udocker` ячейка скачивает опубликованный образ, извлекает его во временный `/content/udocker`, подключает NVIDIA-библиотеки и проверяет CUDA **внутри образа**. Образ должен быть публичным и уже собранным GitHub Actions для напечатанного SHA-тега.
+        В режиме `udocker` ячейка скачивает опубликованный образ с возобновлением каждого OCI-слоя после сетевого обрыва, загружает его в `/content/udocker`, подключает NVIDIA-библиотеки и проверяет CUDA **внутри образа**. Размер и SHA-256 каждого слоя проверяются до импорта. Образ должен быть публичным и уже собранным GitHub Actions для напечатанного SHA-тега.
 
         В режиме `native` вместо этого создаётся временное Python 3.10 окружение. В обоих режимах веса модели загружаются на Drive один раз.
         """
@@ -260,17 +262,23 @@ CELLS = [
 
             udocker = ["udocker", "--allow-root"]
             subprocess.run([*udocker, "rm", "-f", CONTAINER_NAME], env=udocker_env, check=False)
-            try:
-                subprocess.run(
-                    [*udocker, "pull", "--platform=linux/amd64", container_image],
-                    env=udocker_env,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise RuntimeError(
-                    "Не удалось скачать точный GHCR-образ. Дождитесь завершения GitHub Actions "
-                    "и сделайте package публичным, затем повторите ячейку."
-                ) from exc
+            subprocess.run([*udocker, "rmi", container_image], env=udocker_env, check=False)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(APP_DIR / "scripts" / "pull_oci_resumable.py"),
+                    container_image,
+                    "--layout-dir", str(OCI_LAYOUT_DIR),
+                    "--output", str(OCI_ARCHIVE),
+                ],
+                check=True,
+            )
+            subprocess.run(
+                [*udocker, "load", "-i", str(OCI_ARCHIVE), container_image],
+                env=udocker_env,
+                check=True,
+            )
+            OCI_ARCHIVE.unlink(missing_ok=True)
             subprocess.run(
                 [*udocker, "create", f"--name={CONTAINER_NAME}", container_image],
                 env=udocker_env,

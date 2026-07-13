@@ -52,6 +52,8 @@ def validate_notebooks() -> None:
     forbidden_docker_commands = [r"\[\s*['\"]docker['\"]", r"!\s*docker\b", r"\bdocker\s+compose\b"]
     if any(re.search(pattern, code, flags=re.IGNORECASE) for pattern in forbidden_docker_commands):
         raise ValueError("Hosted Colab notebook must not invoke Docker Engine")
+    if '[*udocker, "pull"' in code:
+        raise ValueError("Hosted Colab must use the resumable OCI downloader, not udocker pull")
     for required in [
         'EXECUTION_MODE = "udocker"',
         'REPO_URL = "https://github.com/nahmax/voice-tts.git"',
@@ -66,6 +68,9 @@ def validate_notebooks() -> None:
         'STOP_APP = False',
         'WARNING: Google Drive mount failed',
         'STORAGE_ROOT = Path("/content/voice-tts-data")',
+        'pull_oci_resumable.py',
+        '[*udocker, "load", "-i"',
+        'OCI_ARCHIVE.unlink(missing_ok=True)',
     ]:
         if required not in code:
             raise ValueError(f"Canonical notebook is missing: {required}")
