@@ -256,7 +256,7 @@ CELLS = [
             subprocess.run([sys.executable, "-m", "pip", "install", f"udocker=={UDOCKER_VERSION}"], check=True)
             udocker_env = os.environ.copy()
             udocker_env["UDOCKER_DIR"] = str(UDOCKER_DIR)
-            subprocess.run(["udocker", "install"], env=udocker_env, check=True)
+            subprocess.run(["udocker", "--allow-root", "install"], env=udocker_env, check=True)
 
             udocker = ["udocker", "--allow-root"]
             subprocess.run([*udocker, "rm", "-f", CONTAINER_NAME], env=udocker_env, check=False)
