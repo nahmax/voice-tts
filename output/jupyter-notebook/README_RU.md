@@ -17,7 +17,7 @@
 9. Сохраняет результаты в `MyDrive/Voice TTS/runs/`.
 10. Останавливает приложение и закрывает временную ссылку.
 
-Hosted Colab не запускает Docker daemon. `udocker` исполняет доверенный контейнерный образ в user space без полноценной Docker-изоляции. Перед запуском дождитесь GitHub Actions, сделайте GHCR package публичным, задайте `REPO_URL`, оставьте `EXECUTION_MODE = "udocker"` и выполните notebook сверху вниз. Если этот runtime несовместим с `udocker`, смените режим на `native`.
+Hosted Colab не запускает Docker daemon. `udocker` исполняет доверенный контейнерный образ в user space без полноценной Docker-изоляции. Перед запуском дождитесь GitHub Actions, сделайте GHCR package публичным, оставьте готовые `REPO_URL` и `EXECUTION_MODE = "udocker"`, затем выполните notebook сверху вниз. Если этот runtime несовместим с `udocker`, смените режим на `native`. Для остановки поставьте `STOP_APP = True` и отдельно выполните финальную ячейку.
 
 Предыдущие раздельные setup/workflow notebooks удалены: весь актуальный запуск, включая необязательный импорт `local_voice_library_upload.zip`, находится в одном файле.
 

@@ -54,6 +54,7 @@ def validate_notebooks() -> None:
         raise ValueError("Hosted Colab notebook must not invoke Docker Engine")
     for required in [
         'EXECUTION_MODE = "udocker"',
+        'REPO_URL = "https://github.com/nahmax/voice-tts.git"',
         'UDOCKER_VERSION = "1.3.17"',
         'f"{image_repository}:sha-{commit[:12]}"',
         '"--nvidia"',
@@ -62,6 +63,7 @@ def validate_notebooks() -> None:
         'EXECUTION_MODE == "native"',
         'require_cuda(); print(ensure_model_downloaded())',
         '"--share", "--port", "7860"',
+        'STOP_APP = False',
     ]:
         if required not in code:
             raise ValueError(f"Canonical notebook is missing: {required}")

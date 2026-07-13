@@ -45,11 +45,11 @@ flowchart LR
 3. Откройте notebook из GitHub через Google Colab.
 4. Дождитесь успешного workflow **Validate and publish GPU image**.
 5. В настройках GitHub Package сделайте GHCR package публичным.
-6. В первой конфигурационной ячейке замените `YOUR_USERNAME` в `REPO_URL`.
+6. Оставьте готовый `REPO_URL` либо замените его URL своего форка.
 7. Оставьте `EXECUTION_MODE = "udocker"` и пустой `CONTAINER_IMAGE_OVERRIDE`.
 8. Выберите `Runtime -> Change runtime type -> L4 GPU`.
 9. Выполните ячейки сверху вниз и откройте временную ссылку Gradio.
-10. После работы выполните ячейку остановки и удалите Colab runtime.
+10. После работы поставьте `STOP_APP = True`, выполните ячейку остановки и удалите Colab runtime.
 
 Notebook сам:
 

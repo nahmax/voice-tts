@@ -62,7 +62,7 @@ CELLS = [
 
         1. загрузите проект в GitHub и дождитесь зелёного workflow **Validate and publish GPU image**;
         2. сделайте GHCR package публичным, чтобы Colab мог скачать образ без токена;
-        3. замените `YOUR_USERNAME` в `REPO_URL`;
+        3. при необходимости укажите форк в `REPO_URL`; по умолчанию уже выбран опубликованный репозиторий проекта;
         4. выберите `Runtime -> Change runtime type -> L4 GPU`.
 
         Оставьте `CONTAINER_IMAGE_OVERRIDE` пустым: notebook сам выберет неизменяемый тег `sha-<commit>`. Укажите override только для осознанной проверки другого публичного образа.
@@ -72,7 +72,7 @@ CELLS = [
         """
         from pathlib import Path
 
-        REPO_URL = "https://github.com/YOUR_USERNAME/voice-tts.git"  # @param {type:"string"}
+        REPO_URL = "https://github.com/nahmax/voice-tts.git"  # @param {type:"string"}
         GIT_REF = "main"  # @param {type:"string"}
         EXECUTION_MODE = "udocker"  # @param ["udocker", "native"]
         CONTAINER_IMAGE_OVERRIDE = ""  # @param {type:"string"}
@@ -124,9 +124,6 @@ CELLS = [
         """
         import re
         import subprocess
-
-        if "YOUR_USERNAME" in REPO_URL:
-            raise ValueError("Сначала укажите настоящий REPO_URL в ячейке настройки.")
 
         if not (APP_DIR / ".git").exists():
             subprocess.run(["git", "clone", "--filter=blob:none", REPO_URL, str(APP_DIR)], check=True)
@@ -442,7 +439,7 @@ CELLS = [
         """
         ## 8. Остановка
 
-        После работы закройте публичную ссылку, а затем выберите `Runtime -> Disconnect and delete runtime`, чтобы освободить L4.
+        `Run all` намеренно оставляет приложение запущенным. После работы поставьте `STOP_APP = True`, выполните эту ячейку отдельно, а затем выберите `Runtime -> Disconnect and delete runtime`, чтобы освободить L4.
         """
     ),
     code(
@@ -450,8 +447,9 @@ CELLS = [
         import os
         import signal
 
+        STOP_APP = False  # @param {type:"boolean"}
         pid_file = Path("/content/voice_tts_app.pid")
-        if pid_file.exists():
+        if STOP_APP and pid_file.exists():
             pid = int(pid_file.read_text().strip())
             try:
                 os.killpg(pid, signal.SIGTERM)
@@ -459,8 +457,10 @@ CELLS = [
             except ProcessLookupError:
                 print("Process already stopped")
             pid_file.unlink(missing_ok=True)
-        else:
+        elif STOP_APP:
             print("No running app PID found")
+        else:
+            print("App left running. Set STOP_APP = True and run this cell when finished.")
         """
     ),
     markdown(
