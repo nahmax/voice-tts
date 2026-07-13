@@ -274,7 +274,7 @@ CELLS = [
                 check=True,
             )
             subprocess.run(
-                [*udocker, "load", "-i", str(OCI_ARCHIVE), container_image],
+                [*udocker, "load", "-i", str(OCI_ARCHIVE), image_repository],
                 env=udocker_env,
                 check=True,
             )
