@@ -82,9 +82,17 @@ def validate_text_artifacts() -> None:
     print("Compose GPU declaration present: compose.yaml")
 
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    for required in ["FROM nvidia/cuda:", "REQUIRE_CUDA=1", "COSYVOICE_FP16=1"]:
+    for required in [
+        "FROM nvidia/cuda:",
+        "REQUIRE_CUDA=1",
+        "COSYVOICE_FP16=1",
+        "pip==25.3 setuptools==80.9.0 wheel==0.45.1",
+        "--no-build-isolation --no-deps openai-whisper==20231117",
+    ]:
         if required not in dockerfile:
             raise ValueError(f"Dockerfile is missing: {required}")
+    if "GRADIO_PASSWORD=" in dockerfile:
+        raise ValueError("Dockerfile must not bake a Gradio password into image ENV")
     print("Docker CUDA runtime declaration present: Dockerfile")
 
     workflow = (ROOT / ".github" / "workflows" / "docker.yml").read_text(encoding="utf-8")

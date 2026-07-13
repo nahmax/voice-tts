@@ -149,6 +149,7 @@ docker compose exec app nvidia-smi
 - CosyVoice upstream зафиксирован на commit `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc`.
 - Docker base: `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`; официальный CosyVoice requirements устанавливает PyTorch 2.3.1 CUDA 12.1.
 - Gradio: `5.4.0`, согласованный с официальным `requirements.txt` CosyVoice.
+- Build toolchain: `pip==25.3`, `setuptools==80.9.0`, `wheel==0.45.1`; старый Whisper собирается отдельно без build isolation, чтобы новая версия pip не ломала закреплённый upstream.
 
 Официальные источники: [CosyVoice](https://github.com/FunAudioLLM/CosyVoice), [модель CosyVoice 3](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512), [Docker Compose GPU](https://docs.docker.com/compose/how-tos/gpu-support/), [Colab local runtimes](https://research.google.com/colaboratory/local-runtimes.html), [udocker user manual](https://github.com/indigo-dc/udocker/blob/master/docs/user_manual.md).
 

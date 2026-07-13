@@ -33,7 +33,8 @@ git -C "${COSYVOICE_REPO}" fetch --depth 1 origin "${COSYVOICE_REF}"
 git -C "${COSYVOICE_REPO}" checkout --detach "${COSYVOICE_REF}"
 git -C "${COSYVOICE_REPO}" submodule update --init --recursive
 
-"${PYTHON}" -m pip install --upgrade pip
+"${PYTHON}" -m pip install pip==25.3 setuptools==80.9.0 wheel==0.45.1
+"${PYTHON}" -m pip install --no-build-isolation --no-deps openai-whisper==20231117
 "${PYTHON}" -m pip install -r "${COSYVOICE_REPO}/requirements.txt"
 "${PYTHON}" -m pip install -r "${APP_ROOT}/requirements-app.txt"
 

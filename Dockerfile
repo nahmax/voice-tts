@@ -15,9 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     REQUIRE_CUDA=1 \
     COSYVOICE_FP16=1 \
     GRADIO_SERVER_NAME=0.0.0.0 \
-    GRADIO_SERVER_PORT=7860 \
-    GRADIO_USERNAME=voice \
-    GRADIO_PASSWORD=change-me-now
+    GRADIO_SERVER_PORT=7860
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -40,7 +38,8 @@ RUN apt-get update \
 RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git /opt/CosyVoice \
     && git -C /opt/CosyVoice checkout "${COSYVOICE_REF}" \
     && git -C /opt/CosyVoice submodule update --init --recursive \
-    && python -m pip install --upgrade pip \
+    && python -m pip install pip==25.3 setuptools==80.9.0 wheel==0.45.1 \
+    && python -m pip install --no-build-isolation --no-deps openai-whisper==20231117 \
     && python -m pip install -r /opt/CosyVoice/requirements.txt
 
 WORKDIR /workspace
