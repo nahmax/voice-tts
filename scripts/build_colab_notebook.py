@@ -520,7 +520,16 @@ CELLS = [
             else:
                 voxcpm_progress.run(
                     "Создание отдельного VoxCPM2 Python-окружения",
-                    [sys.executable, "-m", "venv", "--system-site-packages", str(VOXCPM_ENV)],
+                    [
+                        sys.executable, "-c",
+                        "import shutil, subprocess, sys; "
+                        f"path={str(VOXCPM_ENV)!r}; "
+                        "shutil.rmtree(path, ignore_errors=True); "
+                        "subprocess.check_call([sys.executable, '-m', 'pip', 'install', "
+                        "'--disable-pip-version-check', 'virtualenv==20.35.4']); "
+                        "subprocess.check_call([sys.executable, '-m', 'virtualenv', "
+                        "'--system-site-packages', path])",
+                    ],
                 )
                 voxcpm_progress.run(
                     f"Установка VoxCPM2 {VOXCPM_VERSION}",
