@@ -567,6 +567,10 @@ CELLS = [
             voxcpm_env.update({
                 "PYTHONUNBUFFERED": "1",
                 "HF_HOME": str(VOXCPM_HF_HOME),
+                # hf-xet can stall while reconstructing multi-gigabyte files directly
+                # on Google DriveFS. The regular HTTP downloader writes one resumable
+                # file and is substantially more reliable for this persistent cache.
+                "HF_HUB_DISABLE_XET": "1",
                 "VOXCPM_MODEL_ID": VOXCPM_MODEL_ID,
                 "VOXCPM_WORKER_TOKEN": voxcpm_worker_token,
             })
