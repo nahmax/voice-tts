@@ -6,6 +6,7 @@ import gc
 import io
 import json
 import os
+import random
 import tempfile
 import threading
 import time
@@ -20,6 +21,7 @@ MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_TEXT_LENGTH = 2_000
 _MODEL = None
 _MODEL_LOCK = threading.Lock()
+_INFERENCE_LOCK = threading.Lock()
 _STATE_LOCK = threading.Lock()
 _STATE: dict[str, Any] = {"status": "idle", "error": ""}
 
@@ -153,7 +155,12 @@ def synthesize(payload: dict[str, Any]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="voxcpm_worker_") as temp_dir:
         reference_path = Path(temp_dir) / "reference.wav"
         reference_path.write_bytes(reference_bytes)
-        with torch.inference_mode():
+        seed = int(payload.get("seed", 42))
+        with _INFERENCE_LOCK, torch.inference_mode():
+            random.seed(seed)
+            np.random.seed(seed % (2**32 - 1))
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
             wav = model.generate(
                 text=text,
                 prompt_wav_path=str(reference_path),
@@ -161,7 +168,6 @@ def synthesize(payload: dict[str, Any]) -> dict[str, Any]:
                 reference_wav_path=str(reference_path),
                 cfg_value=float(payload.get("cfg_value", 2.0)),
                 inference_timesteps=int(payload.get("inference_timesteps", 10)),
-                seed=int(payload.get("seed", 42)),
             )
 
     waveform = np.asarray(wav, dtype=np.float32).squeeze()
