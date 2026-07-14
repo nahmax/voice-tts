@@ -10,6 +10,26 @@ from typing import Any
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
 COSYVOICE3_PROMPT_PREFIX = "You are a helpful assistant.<|endofprompt|>"
 MAX_TEXT_LENGTH = 1_500
+SUPPORTED_EXPRESSIVE_TAGS = frozenset({
+    "[accent]",
+    "[breath]",
+    "[clucking]",
+    "[cough]",
+    "[hissing]",
+    "[laughter]",
+    "[lipsmack]",
+    "[mn]",
+    "[noise]",
+    "[quick_breath]",
+    "[sigh]",
+    "[vocalized-noise]",
+})
+EXPRESSIVE_TAG_ALIASES = {
+    "[moan]": "[vocalized-noise]",
+    "[orgasm]": "[vocalized-noise]",
+}
+_EXPRESSIVE_TAG_RE = re.compile(r"\[[A-Za-z][A-Za-z0-9_-]{1,31}\]")
+_SPOKEN_WORD_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 
 @dataclass(frozen=True)
@@ -35,7 +55,57 @@ def validate_tts_text(value: str | None) -> str:
         raise ValueError("Введите текст, который нужно озвучить.")
     if len(text) > MAX_TEXT_LENGTH:
         raise ValueError(f"Текст слишком длинный: максимум {MAX_TEXT_LENGTH} символов за один запуск.")
-    return text
+    return normalize_tts_tags(text)
+
+
+def normalize_tts_tags(text: str) -> str:
+    """Normalize expressive tags and reject tags that can truncate CosyVoice output."""
+    unknown: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0).lower()
+        if tag in EXPRESSIVE_TAG_ALIASES:
+            return EXPRESSIVE_TAG_ALIASES[tag]
+        if tag in SUPPORTED_EXPRESSIVE_TAGS:
+            return tag
+        unknown.append(match.group(0))
+        return match.group(0)
+
+    normalized = _EXPRESSIVE_TAG_RE.sub(replace, text)
+    if unknown:
+        supported = ", ".join(sorted(SUPPORTED_EXPRESSIVE_TAGS))
+        raise ValueError(
+            f"Неподдерживаемый тег: {unknown[0]}. Он может оборвать оставшийся текст. "
+            f"Используйте один из тегов: {supported}."
+        )
+    return normalized
+
+
+def split_tts_text(text: str, max_chars: int = 180) -> list[str]:
+    """Split text into sentence-sized synthesis calls without losing words.
+
+    CosyVoice may stop after the first sentence when several sentences are sent in
+    one zero-shot request.  Sentence boundaries are therefore hard boundaries; a
+    single unusually long sentence is additionally split on words.
+    """
+    if max_chars < 40:
+        raise ValueError("max_chars must be at least 40")
+
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", text) if part.strip()]
+    chunks: list[str] = []
+    for sentence in sentences:
+        current = ""
+        words = sentence.split()
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and len(candidate) > max_chars:
+                chunks.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+    return chunks or [text]
 
 
 def format_prompt_text(transcript: str | None) -> str:
@@ -45,7 +115,23 @@ def format_prompt_text(transcript: str | None) -> str:
     clean = " ".join(raw.replace("<|endofprompt|>", " ").split())
     if not clean:
         raise ValueError("Не удалось получить расшифровку референсной записи.")
+    if clean[-1] not in ".!?。！？":
+        clean += "."
     return COSYVOICE3_PROMPT_PREFIX + clean
+
+
+def spoken_word_coverage(target_text: str, recognized_text: str) -> float:
+    """Estimate how much target speech exists in an ASR transcript.
+
+    ASR may miss punctuation and proper-name spelling, so truncation detection is
+    intentionally based on spoken word counts instead of exact string equality.
+    """
+    target_without_tags = _EXPRESSIVE_TAG_RE.sub(" ", target_text.lower())
+    target_words = _SPOKEN_WORD_RE.findall(target_without_tags)
+    recognized_words = _SPOKEN_WORD_RE.findall(recognized_text.lower())
+    if not target_words:
+        return 1.0
+    return min(1.0, len(recognized_words) / len(target_words))
 
 
 def voices_dir(data_dir: Path) -> Path:

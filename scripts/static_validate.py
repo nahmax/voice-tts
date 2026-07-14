@@ -56,6 +56,11 @@ def validate_notebooks() -> None:
         raise ValueError("Hosted Colab must use the resumable OCI downloader, not udocker pull")
     for required in [
         'EXECUTION_MODE = "udocker"',
+        'ENABLE_VOXCPM = True',
+        'VOXCPM_VERSION = "2.0.3"',
+        'VOXCPM_MODEL_ID = "openbmb/VoxCPM2"',
+        'voxcpm_worker.py',
+        '"DEFAULT_TTS_ENGINE": "voxcpm2"',
         'REPO_URL = "https://github.com/nahmax/voice-tts.git"',
         'UDOCKER_VERSION = "1.3.17"',
         'f"{image_repository}:sha-{commit[:12]}"',
@@ -71,6 +76,12 @@ def validate_notebooks() -> None:
         'pull_oci_resumable.py',
         '[*udocker, "load", "-i"',
         'OCI_ARCHIVE.unlink(missing_ok=True)',
+        'PROGRESS_HEARTBEAT_SECONDS = 15',
+        'GRADIO_START_TIMEOUT_SECONDS = 600',
+        'class StageProgress',
+        'после этого останется этапов',
+        'UDOCKER_READY_MARKER.write_text',
+        'NATIVE_READY_MARKER.write_text',
     ]:
         if required not in code:
             raise ValueError(f"Canonical notebook is missing: {required}")
@@ -80,9 +91,27 @@ def validate_notebooks() -> None:
     if "python -m pip uninstall -y deepspeed" not in dockerfile:
         raise ValueError("Docker image must remove the training-only DeepSpeed package")
 
+    oci_downloader = (ROOT / "scripts" / "pull_oci_resumable.py").read_text(encoding="utf-8")
+    for required in [
+        "class DownloadProgress",
+        "OCI download plan:",
+        "remaining {format_bytes(remaining)}",
+        "ETA {eta}",
+    ]:
+        if required not in oci_downloader:
+            raise ValueError(f"OCI downloader is missing progress reporting: {required}")
+
     app_source = (ROOT / "app.py").read_text(encoding="utf-8")
     if "allowed_paths=[str(runs_dir(DATA_DIR))]" not in app_source:
         raise ValueError("Gradio must be allowed to serve generated WAV files")
+    for required in ["available_tts_engines()", "engine=selected_engine", '"tts_engine": selected_engine']:
+        if required not in app_source:
+            raise ValueError(f"Gradio app is missing multi-engine integration: {required}")
+
+    worker_source = (ROOT / "scripts" / "voxcpm_worker.py").read_text(encoding="utf-8")
+    for required in ["VoxCPM.from_pretrained", "prompt_wav_path", "reference_wav_path", "--preload"]:
+        if required not in worker_source:
+            raise ValueError(f"VoxCPM2 worker is missing: {required}")
 
 
 def validate_text_artifacts() -> None:

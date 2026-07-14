@@ -29,7 +29,8 @@ MANIFEST_ACCEPT = ", ".join(
     ]
 )
 CHUNK_SIZE = 8 * 1024 * 1024
-REPORT_STEP = 256 * 1024 * 1024
+REPORT_STEP = 64 * 1024 * 1024
+REPORT_INTERVAL = 10.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,81 @@ class ImageReference:
     repository: str
     reference: str
     tag: str
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes:d}m {seconds:02d}s"
+    return f"{seconds:d}s"
+
+
+def format_bytes(size: float) -> str:
+    value = float(max(0, size))
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    unit = units[0]
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            break
+        value /= 1024
+    precision = 0 if unit in {"B", "KiB"} else 2
+    return f"{value:.{precision}f} {unit}"
+
+
+class DownloadProgress:
+    def __init__(self, descriptors: list[dict[str, Any]]) -> None:
+        self.sizes = {str(item["digest"]): int(item["size"]) for item in descriptors}
+        self.current = {digest: 0 for digest in self.sizes}
+        self.total = sum(self.sizes.values())
+        self.started = time.monotonic()
+        self.session_transferred = 0
+        self.last_report_at = self.started
+        self.last_report_bytes = 0
+
+    def seed(self, digest: str, downloaded: int) -> None:
+        self.current[digest] = min(max(0, downloaded), self.sizes[digest])
+
+    def report(
+        self,
+        digest: str,
+        downloaded: int,
+        *,
+        layer_index: int,
+        layer_count: int,
+        status: str,
+        force: bool = False,
+    ) -> None:
+        previous = self.current[digest]
+        bounded = min(max(0, downloaded), self.sizes[digest])
+        if bounded > previous:
+            self.session_transferred += bounded - previous
+        self.current[digest] = bounded
+
+        now = time.monotonic()
+        done = sum(self.current.values())
+        if not force and done < self.total:
+            enough_bytes = done - self.last_report_bytes >= REPORT_STEP
+            enough_time = now - self.last_report_at >= REPORT_INTERVAL
+            if not enough_bytes and not enough_time:
+                return
+
+        elapsed = max(now - self.started, 0.001)
+        speed = self.session_transferred / elapsed
+        remaining = max(self.total - done, 0)
+        eta = format_duration(remaining / speed) if speed > 0 else "calculating"
+        percent = 100.0 if self.total == 0 else done * 100.0 / self.total
+        print(
+            f"OCI {percent:5.1f}% | {format_bytes(done)}/{format_bytes(self.total)} | "
+            f"remaining {format_bytes(remaining)} | {format_bytes(speed)}/s | ETA {eta} | "
+            f"layer {layer_index}/{layer_count} | {status}",
+            flush=True,
+        )
+        self.last_report_at = now
+        self.last_report_bytes = done
 
 
 def parse_image_reference(value: str) -> ImageReference:
@@ -166,21 +242,54 @@ def download_blob(
     attempts: int,
     retry_delay: float,
     timeout: int,
+    progress: DownloadProgress,
+    layer_index: int,
+    layer_count: int,
 ) -> Path:
     digest = str(descriptor["digest"])
     expected_size = int(descriptor["size"])
     target = blob_path(layout_dir, digest)
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    print(
+        f"Layer {layer_index}/{layer_count}: {digest[:19]} ({format_bytes(expected_size)})",
+        flush=True,
+    )
+    if target.is_file():
+        print(f"Checking cached layer {layer_index}/{layer_count}...", flush=True)
     if blob_is_valid(target, digest, expected_size):
-        print(f"Cached {digest[:19]} ({expected_size / (1024 ** 3):.2f} GiB)", flush=True)
+        progress.report(
+            digest,
+            expected_size,
+            layer_index=layer_index,
+            layer_count=layer_count,
+            status="cached and verified",
+            force=True,
+        )
         return target
     if target.exists():
         target.unlink()
+        progress.report(
+            digest,
+            0,
+            layer_index=layer_index,
+            layer_count=layer_count,
+            status="invalid cache removed",
+            force=True,
+        )
 
     partial = target.with_name(target.name + ".part")
     if partial.exists() and partial.stat().st_size > expected_size:
         partial.unlink()
+    existing_partial = partial.stat().st_size if partial.exists() else 0
+    progress.report(
+        digest,
+        existing_partial,
+        layer_index=layer_index,
+        layer_count=layer_count,
+        status=(f"resuming at {format_bytes(existing_partial)}" if existing_partial else "starting"),
+        force=True,
+    )
 
     last_error: BaseException | None = None
     for attempt in range(1, attempts + 1):
@@ -207,27 +316,34 @@ def download_blob(
                     raise RuntimeError(f"Expected HTTP 206 while resuming, got {status}")
 
                 downloaded = existing
-                next_report = max(REPORT_STEP, ((existing // REPORT_STEP) + 1) * REPORT_STEP)
                 mode = "ab" if existing else "wb"
                 with partial.open(mode) as handle:
                     while chunk := response.read(CHUNK_SIZE):
                         handle.write(chunk)
                         downloaded += len(chunk)
-                        if downloaded >= next_report or downloaded == expected_size:
-                            print(
-                                f"{digest[:19]}: {downloaded / (1024 ** 3):.2f}/"
-                                f"{expected_size / (1024 ** 3):.2f} GiB",
-                                flush=True,
-                            )
-                            next_report += REPORT_STEP
+                        progress.report(
+                            digest,
+                            downloaded,
+                            layer_index=layer_index,
+                            layer_count=layer_count,
+                            status="downloading",
+                        )
 
             if downloaded != expected_size:
                 raise IOError(f"Unexpected EOF at {downloaded} of {expected_size} bytes")
+            print(f"Verifying SHA-256 for layer {layer_index}/{layer_count}...", flush=True)
             if not blob_is_valid(partial, digest, expected_size):
                 partial.unlink(missing_ok=True)
                 raise RuntimeError(f"SHA-256 verification failed for {digest}")
             os.replace(partial, target)
-            print(f"Verified {digest[:19]}", flush=True)
+            progress.report(
+                digest,
+                expected_size,
+                layer_index=layer_index,
+                layer_count=layer_count,
+                status="downloaded and verified",
+                force=True,
+            )
             return target
         except (
             http.client.IncompleteRead,
@@ -243,6 +359,14 @@ def download_blob(
                 f"Retry {attempt}/{attempts} for {digest[:19]} from "
                 f"{current / (1024 ** 3):.2f} GiB: {exc}",
                 flush=True,
+            )
+            progress.report(
+                digest,
+                current,
+                layer_index=layer_index,
+                layer_count=layer_count,
+                status=f"retry {attempt}/{attempts}: {type(exc).__name__}",
+                force=True,
             )
             if attempt < attempts:
                 time.sleep(retry_delay * min(attempt, 5))
@@ -280,7 +404,25 @@ def build_oci_archive(
     write_verified_blob(layout_dir, manifest_digest, manifest_raw)
     manifest = json.loads(manifest_raw)
     descriptors = [manifest["config"], *manifest.get("layers", [])]
+    progress = DownloadProgress(descriptors)
     for descriptor in descriptors:
+        digest = str(descriptor["digest"])
+        expected_size = int(descriptor["size"])
+        target = blob_path(layout_dir, digest)
+        partial = target.with_name(target.name + ".part")
+        if target.exists():
+            progress.seed(digest, min(target.stat().st_size, expected_size))
+        elif partial.exists():
+            progress.seed(digest, min(partial.stat().st_size, expected_size))
+
+    initial_done = sum(progress.current.values())
+    print(
+        f"OCI download plan: {len(descriptors)} layers, {format_bytes(progress.total)} total, "
+        f"{format_bytes(initial_done)} already present, "
+        f"{format_bytes(progress.total - initial_done)} remaining.",
+        flush=True,
+    )
+    for layer_index, descriptor in enumerate(descriptors, start=1):
         download_blob(
             image,
             descriptor,
@@ -288,6 +430,9 @@ def build_oci_archive(
             attempts=attempts,
             retry_delay=retry_delay,
             timeout=timeout,
+            progress=progress,
+            layer_index=layer_index,
+            layer_count=len(descriptors),
         )
 
     index = {

@@ -1,6 +1,6 @@
 # Voice TTS: Colab L4 + Docker GPU
 
-Проект даёт один интерфейс для персонального TTS: загрузить или записать разрешённый голос, ввести текст и получить WAV через CosyVoice 3. Один и тот же `app.py` используется в трёх режимах:
+Проект даёт один интерфейс для персонального TTS: загрузить или записать разрешённый голос, ввести текст и получить WAV через **VoxCPM2 2B** либо **CosyVoice 3**. В Colab VoxCPM2 является основным 48-кГц движком, а CosyVoice 3 остаётся проверенным fallback. Один и тот же `app.py` используется в трёх режимах:
 
 - hosted Google Colab L4 + `udocker` — канонический запуск опубликованного OCI/Docker-образа через один notebook;
 - hosted Google Colab L4 + `native` — резервный запуск кода в изолированном Python 3.10;
@@ -15,7 +15,7 @@ Hosted Google Colab не предоставляет поддерживаемый
 1. GitHub хранит единый исходный код.
 2. GitHub Actions проверяет код, собирает Docker-образ и публикует неизменяемый тег `sha-<12 символов коммита>` в GHCR.
 3. Colab клонирует выбранный Git-коммит и через `udocker` исполняет соответствующий OCI-образ на L4.
-4. До открытия UI notebook проверяет CUDA внутри образа и загружает модель на Google Drive.
+4. До открытия UI notebook проверяет CUDA внутри образа, создаёт отдельное совместимое окружение VoxCPM2 и загружает веса обеих моделей на Google Drive.
 5. Если `udocker` несовместим с конкретным Colab runtime, переключатель `EXECUTION_MODE = "native"` запускает тот же код без контейнера.
 6. На отдельном Linux GPU-сервере тот же образ запускается полноценным Docker Engine.
 
@@ -28,8 +28,10 @@ flowchart LR
     C --> D["Hosted Colab L4: udocker + NVIDIA"]
     C --> E["Linux GPU host: Docker Engine"]
     A --> F["Hosted Colab L4: native fallback"]
-    D --> G["Gradio + Google Drive"]
+    D --> G["Gradio + CosyVoice 3"]
     F --> G
+    A --> H["Отдельный VoxCPM2 worker"]
+    H --> G
 ```
 
 ## Быстрый запуск в Colab
@@ -56,10 +58,12 @@ Notebook сам:
 - проверяет, что выделена L4;
 - получает точный Git-коммит и вычисляет соответствующий GHCR-тег;
 - пытается подключить Google Drive и безопасно переключается на временное хранилище при `mount failed`;
-- в основном режиме устанавливает `udocker==1.3.17`, скачивает каждый OCI-слой с HTTP Range resume, проверяет его размер и SHA-256, импортирует archive через `udocker load` и выполняет `setup --nvidia`;
+- в основном режиме устанавливает `udocker==1.3.17`, скачивает каждый OCI-слой с HTTP Range resume, показывает общий процент, оставшийся объём, скорость и ETA, проверяет размер и SHA-256, импортирует archive через `udocker load` и выполняет `setup --nvidia`;
+- показывает `текущий этап / всего`, количество оставшихся этапов и heartbeat каждые 15 секунд, поэтому долгую команду можно отличить от зависшей; повторный запуск в том же runtime не импортирует уже подготовленный образ заново;
 - проверяет `torch.cuda.is_available()` через приложение внутри образа;
 - в резервном режиме создаёт отдельный Python 3.10 runtime;
-- скачивает модель на Drive только при отсутствии весов;
+- скачивает веса CosyVoice 3 и VoxCPM2 на Drive только при их отсутствии;
+- устанавливает `voxcpm==2.0.3` в отдельное окружение, показывает этапы/heartbeat и прогревает localhost-worker;
 - запускает Gradio в фоне;
 - оставляет голоса и WAV в `MyDrive/Voice TTS/`.
 
@@ -96,13 +100,16 @@ ghcr.io/YOUR_USERNAME/voice-tts
 - запись с микрофона в браузере;
 - выбор ранее сохранённого голоса;
 - Whisper-распознавание текста референса;
+- переключатель `VoxCPM2 2B` / `CosyVoice 3`;
 - поле текста для синтеза;
 - скорость и seed;
 - воспроизведение и сохранение готового WAV.
 
-Для zero-shot voice cloning CosyVoice 3 нужен текст, произнесённый в референсе. Если поле оставить пустым, приложение запускает multilingual Whisper `base` и заполняет эту часть автоматически.
+Для точного клонирования обоим движкам нужен текст, произнесённый в референсе. Если поле оставить пустым, приложение запускает multilingual Whisper `medium` и заполняет расшифровку автоматически. Каждое предложение целевого текста синтезируется отдельным запросом и затем объединяется в один WAV. Готовый WAV повторно распознаётся: приложение не сообщает об успехе, если фактически произнесена только часть текста. Выбранный движок сохраняется в `run.json`.
 
-Рекомендуемый референс: 3-30 секунд чистой речи без музыки, эха и сильного шума.
+VoxCPM2 нельзя устанавливать прямо в закреплённое CosyVoice-окружение: официальные зависимости VoxCPM2 требуют PyTorch >=2.5 и Gradio 6, а CosyVoice в этом проекте использует PyTorch 2.3.1 и Gradio 5.4. Поэтому Colab запускает VoxCPM2 отдельным localhost-worker. При смене движка неиспользуемая TTS-модель выгружается из VRAM; Whisper остаётся доступен для проверки полноты.
+
+Рекомендуемый референс: 8–15 секунд чистой речи без музыки, эха и сильного шума. Технически можно выбрать 3–30 секунд, но более длинный отрезок не обучает модель и часто ухудшает стабильность клонирования.
 
 ## Docker GPU
 
@@ -135,7 +142,8 @@ docker compose exec app nvidia-smi
 
 - `app.py` — Gradio UI и пользовательский workflow.
 - `voice_tts/core.py` — безопасные имена, библиотека голосов, metadata и проверки текста.
-- `voice_tts/runtime.py` — CUDA, CosyVoice 3, Whisper, нормализация и генерация WAV.
+- `voice_tts/runtime.py` — CUDA, маршрутизация CosyVoice/VoxCPM2, Whisper, нормализация и генерация WAV.
+- `scripts/voxcpm_worker.py` — изолированный localhost-worker VoxCPM2 с загрузкой/выгрузкой модели.
 - `Dockerfile` — Python 3.10/CUDA-образ с зафиксированным CosyVoice upstream.
 - `compose.yaml` — GPU reservation, volumes и порт 7860.
 - `scripts/bootstrap_colab.sh` — изолированная установка CosyVoice в hosted Colab.
@@ -147,12 +155,13 @@ docker compose exec app nvidia-smi
 ## Версии
 
 - Модель: `FunAudioLLM/Fun-CosyVoice3-0.5B-2512`, revision `29e01c4e8d000f4bcd70751be16fa94bf3d85a18`.
+- VoxCPM: пакет `voxcpm==2.0.3`, модель `openbmb/VoxCPM2`, 48 кГц; веса хранятся в `MyDrive/Voice TTS/models/voxcpm-huggingface/`.
 - CosyVoice upstream зафиксирован на commit `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc`.
 - Docker base: `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`; официальный CosyVoice requirements устанавливает PyTorch 2.3.1 CUDA 12.1.
 - Gradio: `5.4.0`, согласованный с официальным `requirements.txt` CosyVoice.
 - Build toolchain: `pip==25.3`, `setuptools==80.9.0`, `wheel==0.45.1`; старый Whisper собирается отдельно без build isolation, чтобы новая версия pip не ломала закреплённый upstream.
 
-Официальные источники: [CosyVoice](https://github.com/FunAudioLLM/CosyVoice), [модель CosyVoice 3](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512), [Docker Compose GPU](https://docs.docker.com/compose/how-tos/gpu-support/), [Colab local runtimes](https://research.google.com/colaboratory/local-runtimes.html), [udocker user manual](https://github.com/indigo-dc/udocker/blob/master/docs/user_manual.md).
+Официальные источники: [VoxCPM2](https://github.com/OpenBMB/VoxCPM), [CosyVoice](https://github.com/FunAudioLLM/CosyVoice), [модель CosyVoice 3](https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512), [Docker Compose GPU](https://docs.docker.com/compose/how-tos/gpu-support/), [Colab local runtimes](https://research.google.com/colaboratory/local-runtimes.html), [udocker user manual](https://github.com/indigo-dc/udocker/blob/master/docs/user_manual.md).
 
 ## Безопасность и согласие
 
