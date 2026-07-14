@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,37 @@ def _new_run_dir() -> Path:
     path = runs_dir(DATA_DIR) / f"{stamp}_{uuid4().hex[:8]}"
     path.mkdir(parents=True, exist_ok=False)
     return path
+
+
+def _create_browser_preview(output_wav: Path) -> Path:
+    """Create a small MP3 for the web player while preserving the 48 kHz WAV."""
+    preview_path = output_wav.with_name("preview.mp3")
+    completed = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(output_wav),
+            "-vn",
+            "-ac",
+            "1",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "96k",
+            str(preview_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or not preview_path.is_file() or preview_path.stat().st_size == 0:
+        LOGGER.warning("MP3 preview creation failed: %s", completed.stderr[-1000:])
+        return output_wav
+    return preview_path
 
 
 def _selected_reference(
@@ -217,6 +249,7 @@ def generate_ui(
             )
 
         progress(0.97, desc="Сохранение проверенного результата")
+        preview_audio = _create_browser_preview(output_wav)
         write_json(
             run_dir / "run.json",
             {
@@ -232,6 +265,7 @@ def generate_ui(
                 "reference_clip_start": float(clip_start) if audio_path else 0.0,
                 "reference_clip_duration": float(clip_duration) if audio_path else 30.0,
                 "output_wav": str(output_wav),
+                "preview_audio": str(preview_audio),
                 "output_transcript": output_transcript,
                 "spoken_word_coverage": output_coverage,
                 "gpu": gpu_summary(),
@@ -247,10 +281,15 @@ def generate_ui(
         )
         progress(1.0, desc="Готово")
         selected = final_voice_name if final_voice_name else (saved_voice or "")
-        return str(output_wav), status, gr.Dropdown(choices=_voice_choices(), value=selected)
+        return (
+            str(preview_audio),
+            str(output_wav),
+            status,
+            gr.Dropdown(choices=_voice_choices(), value=selected),
+        )
     except Exception as exc:
         LOGGER.exception("Speech generation failed")
-        return None, f"Ошибка: {exc}", refresh_voice_choices(saved_voice)
+        return None, None, f"Ошибка: {exc}", refresh_voice_choices(saved_voice)
 
 
 CSS = """
@@ -358,7 +397,17 @@ VoxCPM2 создаёт 48-кГц аудио и используется как �
         )
         generate_button = gr.Button("Сгенерировать речь", variant="primary", elem_id="primary-action")
 
-        output_audio = gr.Audio(label="Результат", type="filepath", autoplay=False)
+        output_audio = gr.Audio(
+            label="Быстрое превью (MP3)",
+            type="filepath",
+            autoplay=False,
+            format="mp3",
+        )
+        output_wav_file = gr.File(
+            label="Исходный WAV 48 кГц",
+            type="filepath",
+            interactive=False,
+        )
         status = gr.Markdown("Ожидание запуска.")
 
         refresh_button.click(refresh_voice_choices, inputs=[saved_voice], outputs=[saved_voice])
@@ -383,7 +432,7 @@ VoxCPM2 создаёт 48-кГц аудио и используется как �
                 seed,
                 consent,
             ],
-            outputs=[output_audio, status, saved_voice],
+            outputs=[output_audio, output_wav_file, status, saved_voice],
         )
 
     return demo

@@ -647,7 +647,7 @@ CELLS = [
         """
         ## 6. Запуск веб-интерфейса
 
-        Ячейка запускает Gradio в фоне и печатает временную ссылку, логин и случайный пароль. Пока ссылка создаётся, каждые 10 секунд выводятся прошедшее время, оставшееся время до таймаута и подтверждение, что PID приложения активен. Повторный запуск ячейки сначала завершает предыдущий процесс.
+        Ячейка запускает Gradio без медленного `gradio.live`, поднимает быстрый Cloudflare Quick Tunnel и печатает временную ссылку, логин и случайный пароль. Пока ссылка создаётся, каждые 10 секунд выводятся прошедшее время, оставшееся время до таймаута и подтверждение, что PID приложения и туннеля активны. Повторный запуск ячейки сначала завершает предыдущие процессы.
         """
     ),
     code(
@@ -661,17 +661,21 @@ CELLS = [
 
         pid_file = Path("/content/voice_tts_app.pid")
         log_file = Path("/content/voice_tts_app.log")
+        tunnel_pid_file = Path("/content/voice_tts_cloudflared.pid")
+        tunnel_log_file = Path("/content/voice_tts_cloudflared.log")
+        cloudflared_binary = Path("/content/cloudflared")
 
         def stop_previous_app():
-            if not pid_file.exists():
-                return
-            old_pid = int(pid_file.read_text().strip())
-            try:
-                os.killpg(old_pid, signal.SIGTERM)
-                time.sleep(2)
-            except ProcessLookupError:
-                pass
-            pid_file.unlink(missing_ok=True)
+            for current_pid_file in [tunnel_pid_file, pid_file]:
+                if not current_pid_file.exists():
+                    continue
+                old_pid = int(current_pid_file.read_text().strip())
+                try:
+                    os.killpg(old_pid, signal.SIGTERM)
+                    time.sleep(1)
+                except ProcessLookupError:
+                    pass
+                current_pid_file.unlink(missing_ok=True)
 
         stop_previous_app()
         gradio_username = "voice"
@@ -687,11 +691,11 @@ CELLS = [
         if EXECUTION_MODE == "udocker":
             process_env = udocker_env.copy()
             command = make_udocker_run(
-                ["python", "app.py", "--host", "127.0.0.1", "--share", "--port", "7860"],
+                ["python", "app.py", "--host", "127.0.0.1", "--port", "7860"],
                 {
                     "GRADIO_USERNAME": gradio_username,
                     "GRADIO_PASSWORD": gradio_password,
-                    "GRADIO_SHARE": "1",
+                    "GRADIO_SHARE": "0",
                     **optional_voxcpm_env,
                 },
             )
@@ -710,10 +714,10 @@ CELLS = [
                 "WHISPER_MODEL": "medium",
                 "GRADIO_USERNAME": gradio_username,
                 "GRADIO_PASSWORD": gradio_password,
-                "GRADIO_SHARE": "1",
+                "GRADIO_SHARE": "0",
                 **optional_voxcpm_env,
             })
-            command = [str(COLAB_PYTHON), "app.py", "--share", "--port", "7860"]
+            command = [str(COLAB_PYTHON), "app.py", "--port", "7860"]
             process_cwd = APP_DIR
 
         with log_file.open("w", encoding="utf-8") as log_handle:
@@ -727,7 +731,33 @@ CELLS = [
             )
         pid_file.write_text(str(process.pid), encoding="utf-8")
 
+        if not cloudflared_binary.is_file():
+            print("Скачивание cloudflared для быстрого публичного туннеля...", flush=True)
+            subprocess.run(
+                [
+                    "curl", "--fail", "--location", "--retry", "5", "--retry-all-errors",
+                    "--progress-bar", "--output", str(cloudflared_binary),
+                    "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
+                ],
+                check=True,
+            )
+            cloudflared_binary.chmod(0o755)
+        subprocess.run([str(cloudflared_binary), "--version"], check=True)
+
+        with tunnel_log_file.open("w", encoding="utf-8") as tunnel_log_handle:
+            tunnel_process = subprocess.Popen(
+                [
+                    str(cloudflared_binary), "tunnel", "--no-autoupdate",
+                    "--protocol", "http2", "--url", "http://127.0.0.1:7860",
+                ],
+                stdout=tunnel_log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        tunnel_pid_file.write_text(str(tunnel_process.pid), encoding="utf-8")
+
         public_url = None
+        local_ready = False
         poll_interval = 2
         max_attempts = max(1, GRADIO_START_TIMEOUT_SECONDS // poll_interval)
         startup_started = time.monotonic()
@@ -738,25 +768,34 @@ CELLS = [
         for attempt in range(1, max_attempts + 1):
             time.sleep(poll_interval)
             log_text = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
-            match = re.search(r"https://[a-zA-Z0-9.-]+\\.gradio\\.live", log_text)
+            tunnel_log_text = (
+                tunnel_log_file.read_text(encoding="utf-8", errors="replace")
+                if tunnel_log_file.exists() else ""
+            )
+            local_ready = local_ready or "Running on local URL:" in log_text
+            match = re.search(r"https://[-a-zA-Z0-9]+\\.trycloudflare\\.com", tunnel_log_text)
             if match:
                 public_url = match.group(0)
+            if public_url and local_ready:
                 break
             if process.poll() is not None:
                 raise RuntimeError("Gradio завершился. Последние строки лога:\\n" + log_text[-6000:])
+            if tunnel_process.poll() is not None:
+                raise RuntimeError("Cloudflare tunnel завершился. Последние строки лога:\\n" + tunnel_log_text[-6000:])
             if attempt % max(1, 10 // poll_interval) == 0:
                 elapsed_seconds = time.monotonic() - startup_started
                 remaining_seconds = max(0, GRADIO_START_TIMEOUT_SECONDS - elapsed_seconds)
                 print(
-                    f"… Gradio всё ещё запускается | прошло {format_elapsed(elapsed_seconds)} | "
-                    f"до таймаута {format_elapsed(remaining_seconds)} | PID {process.pid} активен",
+                    f"… Gradio/Cloudflare запускаются | прошло {format_elapsed(elapsed_seconds)} | "
+                    f"до таймаута {format_elapsed(remaining_seconds)} | "
+                    f"PID app={process.pid}, tunnel={tunnel_process.pid} активны",
                     flush=True,
                 )
-        if not public_url:
+        if not public_url or not local_ready:
             raise TimeoutError(
-                "Ссылка Gradio не появилась за "
+                "Gradio или ссылка Cloudflare не появились за "
                 f"{format_elapsed(GRADIO_START_TIMEOUT_SECONDS)}. "
-                "Проверьте /content/voice_tts_app.log"
+                "Проверьте /content/voice_tts_app.log и /content/voice_tts_cloudflared.log"
             )
 
         print("Gradio готов за", format_elapsed(time.monotonic() - startup_started))
@@ -765,6 +804,7 @@ CELLS = [
         print("Пароль:", gradio_password)
         print("Режим:", EXECUTION_MODE)
         print("PID:", process.pid)
+        print("Cloudflare PID:", tunnel_process.pid)
         """
     ),
     markdown(
@@ -776,7 +816,7 @@ CELLS = [
         3. Загрузите аудио любой длины и выберите 8–15 секунд чистой речи (технический диапазон референса: 3–30 секунд).
         4. При желании нажмите **Распознать референс**; иначе Whisper сделает это при генерации.
         5. Введите текст и нажмите **Сгенерировать речь**.
-        6. Прослушайте WAV. Результат и выбранный движок записываются в `MyDrive/Voice TTS/runs/`, а сохранённый голос — в `MyDrive/Voice TTS/voices/`.
+        6. Прослушайте лёгкое MP3-превью и при необходимости скачайте исходный WAV 48 кГц. Оба файла и выбранный движок записываются в `MyDrive/Voice TTS/runs/`, а сохранённый голос — в `MyDrive/Voice TTS/voices/`.
         """
     ),
     markdown("## 7. Проверка сохранённых результатов"),
@@ -814,6 +854,7 @@ CELLS = [
         if STOP_APP:
             stopped_any = False
             for pid_path, label in [
+                (Path("/content/voice_tts_cloudflared.pid"), "Cloudflare tunnel"),
                 (Path("/content/voice_tts_app.pid"), "Gradio"),
                 (Path("/content/voice_tts_voxcpm.pid"), "VoxCPM2 worker"),
             ]:
@@ -828,9 +869,9 @@ CELLS = [
                 pid_path.unlink(missing_ok=True)
                 stopped_any = True
             if not stopped_any:
-                print("No running app or VoxCPM2 worker PID found")
+                print("No running Cloudflare, app, or VoxCPM2 worker PID found")
         else:
-            print("App and VoxCPM2 worker left running. Set STOP_APP = True when finished.")
+            print("Cloudflare, app, and VoxCPM2 worker left running. Set STOP_APP = True when finished.")
         """
     ),
     markdown(

@@ -69,7 +69,9 @@ def validate_notebooks() -> None:
         'EXECUTION_MODE == "udocker"',
         'EXECUTION_MODE == "native"',
         "print('Model:', type(get_model()).__name__)",
-        '"--share", "--port", "7860"',
+        '"GRADIO_SHARE": "0"',
+        'trycloudflare',
+        'voice_tts_cloudflared.pid',
         'STOP_APP = False',
         'WARNING: Google Drive mount failed',
         'STORAGE_ROOT = Path("/content/voice-tts-data")',
@@ -104,7 +106,14 @@ def validate_notebooks() -> None:
     app_source = (ROOT / "app.py").read_text(encoding="utf-8")
     if "allowed_paths=[str(runs_dir(DATA_DIR))]" not in app_source:
         raise ValueError("Gradio must be allowed to serve generated WAV files")
-    for required in ["available_tts_engines()", "engine=selected_engine", '"tts_engine": selected_engine']:
+    for required in [
+        "available_tts_engines()",
+        "engine=selected_engine",
+        '"tts_engine": selected_engine',
+        "_create_browser_preview",
+        'label="Исходный WAV 48 кГц"',
+        '"preview_audio": str(preview_audio)',
+    ]:
         if required not in app_source:
             raise ValueError(f"Gradio app is missing multi-engine integration: {required}")
 
