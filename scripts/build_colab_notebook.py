@@ -76,6 +76,7 @@ CELLS = [
         GIT_REF = "main"  # @param {type:"string"}
         EXECUTION_MODE = "udocker"  # @param ["udocker", "native"]
         ENABLE_VOXCPM = True  # @param {type:"boolean"}
+        PRELOAD_COSYVOICE = False  # @param {type:"boolean"}
         CONTAINER_IMAGE_OVERRIDE = ""  # @param {type:"string"}
         REQUIRE_L4 = True  # @param {type:"boolean"}
         UDOCKER_VERSION = "1.3.17"
@@ -106,6 +107,7 @@ CELLS = [
             raise ValueError("EXECUTION_MODE must be 'udocker' or 'native'.")
         print("Execution mode:", EXECUTION_MODE)
         print("VoxCPM2 enabled:", ENABLE_VOXCPM)
+        print("CosyVoice preload:", PRELOAD_COSYVOICE)
         print("Repository:", REPO_URL)
         """
     ),
@@ -408,19 +410,25 @@ CELLS = [
             UDOCKER_READY_MARKER.write_text(container_image + "\\n", encoding="utf-8")
             progress.run(
                 "Загрузка или проверка файлов модели",
-                make_udocker_run([
+                (make_udocker_run([
                     "python", "-c",
                     "from voice_tts.runtime import ensure_model_downloaded; "
                     "print('Model files:', ensure_model_downloaded())",
+                ]) if PRELOAD_COSYVOICE else [
+                    sys.executable, "-c",
+                    "print('CosyVoice 3 fallback будет загружен лениво при первом выборе.')",
                 ]),
                 env=udocker_env,
             )
             progress.run(
                 "Загрузка модели в память GPU",
-                make_udocker_run([
+                (make_udocker_run([
                     "python", "-c",
                     "from voice_tts.runtime import require_cuda, get_model; "
                     "require_cuda(); print('Model:', type(get_model()).__name__)",
+                ]) if PRELOAD_COSYVOICE else [
+                    sys.executable, "-c",
+                    "print('Предзагрузка CosyVoice 3 в GPU пропущена.')",
                 ]),
                 env=udocker_env,
             )
@@ -469,21 +477,27 @@ CELLS = [
             NATIVE_READY_MARKER.write_text(commit + "\\n", encoding="utf-8")
             progress.run(
                 "Загрузка или проверка файлов модели",
-                [
+                ([
                     str(COLAB_PYTHON), "-c",
                     "from voice_tts.runtime import ensure_model_downloaded; "
                     "print('Model files:', ensure_model_downloaded())",
-                ],
+                ] if PRELOAD_COSYVOICE else [
+                    sys.executable, "-c",
+                    "print('CosyVoice 3 fallback будет загружен лениво при первом выборе.')",
+                ]),
                 cwd=APP_DIR,
                 env=native_env,
             )
             progress.run(
                 "Загрузка модели в память GPU",
-                [
+                ([
                     str(COLAB_PYTHON), "-c",
                     "from voice_tts.runtime import require_cuda, get_model; "
                     "require_cuda(); print('Model:', type(get_model()).__name__)",
-                ],
+                ] if PRELOAD_COSYVOICE else [
+                    sys.executable, "-c",
+                    "print('Предзагрузка CosyVoice 3 в GPU пропущена.')",
+                ]),
                 cwd=APP_DIR,
                 env=native_env,
             )
