@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,24 @@ _MODEL = None
 _MODEL_LOCK = threading.Lock()
 _STATE_LOCK = threading.Lock()
 _STATE: dict[str, Any] = {"status": "idle", "error": ""}
+
+
+def _is_transient_model_download_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "403 forbidden",
+            "invalid key pair id",
+            "connection error",
+            "connection reset",
+            "remote disconnected",
+            "read timed out",
+            "readtimeout",
+            "timed out",
+            "temporary failure",
+        )
+    )
 
 
 def _set_state(status: str, error: str = "") -> None:
@@ -56,7 +75,28 @@ def get_model():
                 raise RuntimeError("CUDA недоступна в отдельном VoxCPM2-окружении.")
             model_id = os.getenv("VOXCPM_MODEL_ID", "openbmb/VoxCPM2")
             print(f"Loading VoxCPM2 from {model_id} on {torch.cuda.get_device_name(0)}", flush=True)
-            _MODEL = VoxCPM.from_pretrained(model_id, load_denoiser=False)
+            max_attempts = max(1, int(os.getenv("VOXCPM_LOAD_ATTEMPTS", "8")))
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    _MODEL = VoxCPM.from_pretrained(model_id, load_denoiser=False)
+                    break
+                except Exception as exc:
+                    if attempt >= max_attempts or not _is_transient_model_download_error(exc):
+                        raise
+                    delay_seconds = min(3 * attempt, 20)
+                    print(
+                        f"Transient VoxCPM2 download failure ({attempt}/{max_attempts}): "
+                        f"{type(exc).__name__}: {exc}",
+                        flush=True,
+                    )
+                    print(
+                        f"Refreshing the Hugging Face download URL and resuming in "
+                        f"{delay_seconds}s...",
+                        flush=True,
+                    )
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    time.sleep(delay_seconds)
             _set_state("ready")
             print("VoxCPM2 is ready", flush=True)
             return _MODEL
